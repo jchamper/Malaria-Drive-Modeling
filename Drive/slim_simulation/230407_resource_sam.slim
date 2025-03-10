@@ -1,0 +1,1411 @@
+// Author: Yiran Liu and Sam Champer and Isabel Kim.
+// Modified by Yuan Hu Allegretti for machine learning purpose
+// Created in association with Jackson Champer.
+
+// A framework for simulating competition relationship in mosquito specific model.
+// A framework for simulating Malaria in slim Modified by swt.
+
+
+//about output of human-malaria-mosquito model by swt
+//Updated: 230517
+//humans(healthy carrier patient resistant) malaria(adultfemale healthy carrier infected) drive(all wt drive r1 r2 partial_drive) 
+species all initialize() {
+	
+	
+	defineCfgParam("SIGHT",T);
+	defineCfgParam("ENDTIME",600);
+	defineCfgParam("MALARIA_FOCUS",F);
+	
+	defineCfgParam("MALE_AGE",5);
+	defineCfgParam("FEMALE_AGE",7);
+	
+	
+	//SEASONAL parameters
+	defineCfgParam("SEASONAL", T);
+	defineCfgParam("STRONG_SEASONAL", F);
+	defineCfgParam("STRONG_SEASONAL_AMPLITUDE", 0);
+	
+	
+	
+	defineCfgParam("STRONG_SEASONAL_DURATION", 26);//SEASONAL Weeks
+	defineCfgParam("LESS_SEASONAL", T);
+	defineCfgParam("LESS_SEASONAL_AMPLITUDE", 0.8);
+	defineCfgParam("AVERAGE_FE_COMPETITOR", 0); //ASSUME NO COMPETITION
+	
+	
+	//human malaria
+	defineCfgParam("CURE_WEEK",16);
+	defineCfgParam("IMMUNITY",10);//10 is not reasonable
+	defineCfgParam("HUMAN_INCUBATION_PERIOD",2);
+	defineCfgParam("MALARIA_SENSITIVE",0.11);
+	//rate of human become carrier per infection bite��0.11��;
+	
+	
+
+	
+	//mosquito malaria
+	defineCfgParam("MALARIA_TAKEIN_RATE",0.4);
+	defineCfgParam("MALARIA_ACTIVE_MOSQUITO_WEEK1",0.5);
+	
+	
+	//drive malaria
+	defineCfgParam("DRIVE_HOMOZYGOUS_TAKEIN_RATE",1.0);
+	defineCfgParam("DRIVE_HOMOZYGOUS_OUTPUT_RATE",1.0);
+	defineCfgParam("DRIVE_HOMOZYGOUS_ACTIVE_RATE",1.0);
+	//relative active rate maybe not very reasonable
+	
+	defineCfgParam("DRIVE_HETEROZYGOUS_TAKEIN_RATE",sqrt(DRIVE_HOMOZYGOUS_TAKEIN_RATE));
+	defineCfgParam("DRIVE_HETEROZYGOUS_OUTPUT_RATE",sqrt(DRIVE_HOMOZYGOUS_OUTPUT_RATE));
+	defineCfgParam("DRIVE_HETEROZYGOUS_ACTIVE_RATE",sqrt(DRIVE_HOMOZYGOUS_ACTIVE_RATE));
+	
+	//all the rate for drive and malaria are relatively
+	
+	
+	
+	// Spatial:
+	defineCfgParam("SIM_BOUND", 2);//measured by km every spot parameters shoud use km default=4 
+	defineCfgParam("DISTANCE", 0.1);//swt edit measured by km in some paper is 2.1,means the Active radius of mosquito per week,the old is 0.0407
+	defineCfgParam("SIGMA",DISTANCE*sqrt(2/PI));
+	defineCfgParam("COMPETITION_DIST", 0.01*3.3);
+	defineConstant("REPRISING_BOUNDARIES", T); // Toroidal if false
+	defineConstant("DROP_RADIUS", 0.1);//should be smaller than SIM_BOUND/2
+	//defineConstant("SIM_BOUND", 1.2533141373155);//swt edit measured by km in some paper is 2,the old is 1.2533141373155 swt delete SIM_BOUND and add SIM_BOUND
+	
+	//mosquito density
+	defineCfgParam("ADULT_FEMALES_DENSITY", 1500);//to keep the density of mosquito easy to vary.  //YHAnote: 1000 should match with the previous slim mosquito only model
+	defineCfgParam("AVERAGE_NUM_ADULT_FEMALES", asInteger(ADULT_FEMALES_DENSITY*(SIM_BOUND*SIM_BOUND)));
+		//human
+	defineCfgParam("HUMAN_DENSITY",150);
+	defineCfgParam("HUMAN_POPULATION",asInteger(HUMAN_DENSITY*SIM_BOUND*SIM_BOUND));
+	defineCfgParam("INITIAL_HUMAN_MALARIA_FREQUENCY",0.5);
+	defineCfgParam("INITIAL_HUMAN_CARRIER_FREQUENCY",0.05);
+	defineCfgParam("INITIAL_HUMAN_RESISTANT_FREQUENCY",0.28);
+	
+	// Resource node params.
+	defineCfgParam("FORAGING_AREA", PI * COMPETITION_DIST * COMPETITION_DIST / 4);
+	defineCfgParam("NODES_PER_AREA", 3);
+	
+	defineGlobal("ACTUAL_LARVAE", 0);
+	
+	// NEW STUFF:
+	defineCfgParam("REMATE_CHANCE",0.05);
+	defineCfgParam("OLD_LARVA_COMPETITION_FACTOR", 5.0); //new param set by YHA. Assume competition factor A and B is the same.
+	defineCfgParam("OLD_LARVA_COMPETITION_FACTOR_A", OLD_LARVA_COMPETITION_FACTOR);
+	defineCfgParam("OLD_LARVA_COMPETITION_FACTOR_B", OLD_LARVA_COMPETITION_FACTOR);
+	defineGlobal("NUM_ADULT_FEMALES", AVERAGE_NUM_ADULT_FEMALES);
+	defineCfgParam("BETAMAX", 18); //YHA edit: Drop from 25 to 18
+	
+	defineCfgParam("P_HUMAN_IN_TERRITORY", 1-(1-DISTANCE*DISTANCE*PI/(SIM_BOUND*SIM_BOUND))^HUMAN_POPULATION);
+	defineCfgParam("WANT_TO_BITE_RATE",0.8);
+	defineCfgParam("ANIMAL_BITE_RATE",0.5);
+	defineCfgParam("FRACTION_OF_FEMALES_THAT_REPRODUCE_PER_WEEK", WANT_TO_BITE_RATE*(P_HUMAN_IN_TERRITORY+(1-P_HUMAN_IN_TERRITORY)*ANIMAL_BITE_RATE));
+	defineCfgParam("femaleOLD", 1/FEMALE_AGE/(FEMALE_AGE-1)*2);
+	
+	femaleAgeDistribution=c();
+	for (i in seqLen(FEMALE_AGE-1)){
+		femaleAgeDistribution=c(femaleOLD+i*femaleOLD,femaleAgeDistribution);
+	}
+	
+	femaleAgeDistribution=c(femaleOLD*(FEMALE_AGE-1),femaleAgeDistribution);
+	
+	femaleAgeDistribution=c(FRACTION_OF_FEMALES_THAT_REPRODUCE_PER_WEEK * BETAMAX,femaleAgeDistribution);
+	maleOLD=femaleOLD*(FEMALE_AGE-1)/(MALE_AGE-1);
+	maleAgeDistribution=c();
+	for (i in seqLen(MALE_AGE-1)){
+		maleAgeDistribution=c(maleOLD+i*maleOLD,maleAgeDistribution);
+	}
+	maleAgeDistribution=c(maleOLD*(MALE_AGE-1),maleAgeDistribution);
+	maleAgeDistribution=c(FRACTION_OF_FEMALES_THAT_REPRODUCE_PER_WEEK * BETAMAX,maleAgeDistribution);
+	
+	defineConstant("INITIAL_FEMALE_AGE_DISTRIBUTION", femaleAgeDistribution);
+	defineConstant("INITIAL_MALE_AGE_DISTRIBUTION", maleAgeDistribution);
+	
+	//calculate capacity
+	defineGlobal("TOTAL_FEMALES", NUM_ADULT_FEMALES + (FRACTION_OF_FEMALES_THAT_REPRODUCE_PER_WEEK * BETAMAX+ femaleOLD*(FEMALE_AGE-1))*NUM_ADULT_FEMALES);
+	defineConstant("CALC_INITIAL_FEMALE_AGE", FRACTION_OF_FEMALES_THAT_REPRODUCE_PER_WEEK * BETAMAX+1 +femaleOLD*(FEMALE_AGE-1));
+	defineConstant("CALC_INITIAL_MALE_AGE", FRACTION_OF_FEMALES_THAT_REPRODUCE_PER_WEEK * BETAMAX + maleOLD*(MALE_AGE-1)*MALE_AGE/2+maleOLD*(MALE_AGE-1));
+	defineGlobal("CAPACITY", TOTAL_FEMALES + TOTAL_FEMALES*CALC_INITIAL_MALE_AGE/CALC_INITIAL_FEMALE_AGE);
+	
+	defineGlobal("LATE_CAPACITY",CAPACITY-NUM_ADULT_FEMALES*FRACTION_OF_FEMALES_THAT_REPRODUCE_PER_WEEK*BETAMAX*2);
+	
+	// Fitness parameters:
+	defineCfgParam("DD_FITNESS_VALUE",0.91);
+	defineCfgParam("DX_FITNESS_VALUE", sqrt(DD_FITNESS_VALUE));
+	defineCfgParam("SOMATIC_FITNESS_MULTIPLIER_F", 1.0);
+	defineCfgParam("SOMATIC_FITNESS_MULTIPLIER_M", 1.0);
+	//defineCfgParam("GENE_DISRUPTION_FITNESS_MULTIPLIER", 1.0);
+	defineCfgParam("R2_FITNESS_VALUE", 1.0);
+	
+	// Drive type:
+	defineCfgParam("HOMING_DRIVE", T);
+	defineCfgParam("HAPLOLETHAL_DRIVE", F);
+	defineCfgParam("RECESSIVE_LETHAL_DRIVE", F);
+	defineCfgParam("RECESSIVE_LETHAL_SUPPRESSION_DRIVE", F);
+	
+	defineCfgParam("RECESSIVE_FEMALE_STERILE_SUPPRESSION_DRIVE", T);
+	//IT seems RECCESSIVE LETHAL DRIVE
+	defineCfgParam("RECESSIVE_STERILE_SUPPRESSION_DRIVE", F);
+	defineCfgParam("X_SHRED_RATE", 0.0);
+	
+	
+	defineCfgParam("GRC_BETA", 0.5); //New param: range 0-0.99.  To avoid exceeding 1 for sum of GRC and DC
+	defineCfgParam("DRIVE_CONVERSION", 0.85); //modified by YHA
+	defineCfgParam("GERMLINE_RESISTANCE_CUT_RATE", GRC_BETA * (1-DRIVE_CONVERSION)); //YHA edit
+	defineCfgParam("GERMLINE_RESISTANCE_CUT_RATE_F", GERMLINE_RESISTANCE_CUT_RATE);
+	defineCfgParam("GERMLINE_RESISTANCE_CUT_RATE_M", GERMLINE_RESISTANCE_CUT_RATE);
+	defineCfgParam("LATE_GERMLINE_RESISTANCE_CUT_RATE_F", 0.0);
+	defineCfgParam("LATE_GERMLINE_RESISTANCE_CUT_RATE_M", 0.0);
+	
+	//for HOMOZYGOUS
+	defineCfgParam("EMBRYO_RESISTANCE_CUT_RATE_F", 0.7);
+	defineCfgParam("EMBRYO_RESISTANCE_CUT_RATE_M", 0.0);
+	
+	defineCfgParam("HET_MOTHER_CAS_INHERITANCE", 1.83);
+	defineCfgParam("R1_OCCURRENCE_RATE", 0.0);
+	
+	// HDR phase parameters:
+	defineCfgParam("HOMING_PHASE_CUT_RATE_F", DRIVE_CONVERSION/(1-GERMLINE_RESISTANCE_CUT_RATE)); //modified by YHA, 2022/8/9
+	defineCfgParam("HOMING_PHASE_CUT_RATE_M", DRIVE_CONVERSION/(1-GERMLINE_RESISTANCE_CUT_RATE)); //modified
+	defineCfgParam("BASELINE_HOMING_SUCCESS_RATE", 1.0);
+	defineCfgParam("PARTIAL_HDR_RATE", 0.0);
+	defineCfgParam("PER_OFFSET_PARTIAL_HDR_RATE_INCREASE", 0.0);
+	defineCfgParam("PARTIAL_HDR_R1_RATE", 0.0);
+	
+	// General drive parameters:
+	
+	
+	defineCfgParam("X_LINKED", F);
+	defineCfgParam("Y_LINKED", F);
+	defineCfgParam("MALE_ONLY_PROMOTER", F);
+	
+	// Ecology and drop parameters:
+	//defineCfgParam("CAPACITY", NUM_ADULT_FEMALES * 2);
+	defineCfgParam("DROP_SIZE", 0.01);
+	defineCfgParam("MAX_ATTEMPTS_TO_FIND_SUITABLE_MATE", 10);
+	defineCfgParam("LOW_DENSITY_GROWTH_RATE", 5);
+	defineCfgParam("MALE_ONLY_DROP", F);
+	defineCfgParam("FEMALE_ONLY_DROP", F);
+	defineCfgParam("HETEROZYGOUS_DROP", T);
+	
+	defineCfgParam("NO_DROP", F);
+	defineCfgParam("TRACK_BY_CELL", T);
+	defineCfgParam("EQUILIBRIUM_WT_ALLELE_THRESHOLD", 0.8);
+	defineCfgParam("NUMBER_OF_CELLS", 64);
+	
+	
+	defineGlobal("EXPECTED_COMPETITON", COMPETITION_DIST^2 * PI/ SIM_BOUND^2 * (NUM_ADULT_FEMALES * (2 * BETAMAX * FRACTION_OF_FEMALES_THAT_REPRODUCE_PER_WEEK + 2 * femaleOLD * (FEMALE_AGE-1) * OLD_LARVA_COMPETITION_FACTOR)));
+	defineCfgParam("FITNESS_CONSTANT",(femaleOLD*(FEMALE_AGE-1)) * LOW_DENSITY_GROWTH_RATE / (BETAMAX*FRACTION_OF_FEMALES_THAT_REPRODUCE_PER_WEEK));
+	defineCfgParam("DRIVE_SEX_RATIO", 1 - (0.5 * (1 - X_SHRED_RATE)) / (0.5 + (0.5 * (1 - X_SHRED_RATE))));
+	
+	// This simulation will use a non-Wright-Fisher model.
+	initializeSLiMModelType("nonWF");
+	
+	
+	// Mate searching:
+	initializeInteractionType(1, "xy", reciprocal=T, maxDistance=DISTANCE);
+	// Adult competition:
+	initializeInteractionType(2, "xy", reciprocal=T, maxDistance=COMPETITION_DIST);
+	i2.setInteractionFunction("l", 1.0);
+	//feeding
+	initializeInteractionType(3, "xy", reciprocal=T, maxDistance=DISTANCE);
+}
+species vector initialize() {
+	initializeSpecies(avatar="V", color="red");
+	if (REPRISING_BOUNDARIES)
+		initializeSLiMOptions(keepPedigrees=T, dimensionality = "xy");
+	else
+		initializeSLiMOptions(keepPedigrees=T, dimensionality="xy", periodicity="xy");
+	
+	// Four variations: Wild type, drive, r1 resistance, r2 resistance.
+	// 'cut' is a temporary placeholder, and 'gap' represents a missing segment.
+	wt = initializeMutationType("m1", 0.5, "f", 0.0);
+	dr = initializeMutationType("m2", 0.5, "f", 0.0);
+	r1 = initializeMutationType("m3", 0.5, "f", 0.0);
+	r2 = initializeMutationType("m4", 0.5, "f", 0.0);
+	cut = initializeMutationType("m5", 0.5, "f", 0.0);
+	gap = initializeMutationType("m6", 0.5, "f", 0.0);
+	
+	
+	
+	variations = c(wt, dr, r1, r2, cut, gap);
+	//competitions = c(competition);
+	initializeGenomicElementType("g1", variations, c(1, 1, 1, 1, 1, 1));
+	//initializeGenomicElementType("g2", competitions, c(1));
+	
+	// Element is 1 long, each spot on the element representing a GRNA target location.
+	initializeGenomicElement(g1, 0, 0);
+	
+	// These variations overwrite one another.
+	variations.mutationStackPolicy = "l";
+	variations.mutationStackGroup = 1;
+	
+	
+	// No mutation in this model.
+	initializeMutationRate(0.0);
+	initializeRecombinationRate(0.0);
+	
+	// Simulate sexual reproduction: A for autosome.
+	initializeSex("A");
+
+}
+
+species host initialize() {
+	initializeSpecies(avatar="H", color="cornflowerblue");
+	initializeSLiMOptions(dimensionality="xy");
+}
+
+species resource_node initialize() {
+	initializeSpecies(avatar="R", color="cornflowerblue");
+	initializeSLiMOptions(dimensionality="xy");
+}
+
+//// HELPER FUNC FOR CONSTANTS THAT MAY ASLO BE CONFIGURED VIA COMMAND LINE.
+function (void) defineCfgParam(string$ name, lifs value) {
+	if (!exists(name))
+		defineConstant(name, value);
+}
+
+//// HELPER FUNCTION FOR FORMING A RESISTANCE ALLELE AT A GIVEN LOCUS.
+function (void)addResistanceAllele(o<Genome>$ genome, i$ locus) {
+	// Resistance alleles form at a specified rate.
+	// m3 is R1 allele, m4 is R2.
+	if(runif(1) < R1_OCCURRENCE_RATE)
+		genome.addNewDrawnMutation(m3, locus);
+	else
+		genome.addNewDrawnMutation(m4, locus);
+}
+
+//// FUNCTION FOR CAS9 EFFECTS IN THE GERMLINE.
+function (void)germline(o<Genome>$ child_chromosome, o<Individual>$ parent, f$ resistance_rate, [l maleParent=F]) {
+	// Chromosome must have wt to cut, or nothing happens.
+	if (!child_chromosome.containsMarkerMutation(m1,0))
+		return;
+	if (!maleParent) {
+		// Determine presence of drive in this parent.
+		parent_drive_count = sum(parent.genomes.containsMarkerMutation(m2,0));
+		// If parent doesn't have drive allele, nothing happens in germline.
+	}
+	if (maleParent) {
+		maternal = asInteger(parent.tag / 10);
+		paternal = parent.tag - 10 * maternal;
+		if (maternal != 2 & paternal != 2) //Yuan's note: neither of the parents have DR allele
+			return; //Do nothing
+	}
+	
+	
+	
+	// Determine if cas9 cuts the chromosome in the germline.
+	casCut(child_chromosome, resistance_rate);
+}
+
+//// FUNCTION FOR CAS9 EFFECTS IN EMBRYO.
+function (void)embryo(o<Genome>$ child_chromosome_1, o<Genome>$ child_chromosome_2, o<Individual>$ mother, f$ resistance_rate) {
+	// Determine presence of drive in this mother.
+	mother_drive_count = sum(mother.genomes.containsMarkerMutation(m2,0));
+	
+	// If mother doesn't have drive allele, nothing happens in embryo.
+	
+	// Determine the per phase cut rate.
+	if (HOMING_DRIVE & sum(mother.genomes.containsMarkerMutation(m1,0))==1)
+		// Special case for homing drive individual that is dr/wt based on experimental data.
+		mother_drive_count = HET_MOTHER_CAS_INHERITANCE;
+	
+	cut_rate = 1 - (1 - resistance_rate)^(mother_drive_count/2);
+	
+	
+	
+	// Then pass the rates as an argument to the casCut funtion to
+	// determine if cas9 cuts in the embryo for each chromosome.
+	casCut(child_chromosome_1, cut_rate);
+	casCut(child_chromosome_2, cut_rate);
+}
+
+//// FUNCTION FOR CAS9 EFFECTS IN EMBRYO.
+function (void)male_deposition(o<Genome>$ child_chromosome_1, o<Genome>$ child_chromosome_2, o<Individual>$ parent, f$ resistance_rate) {
+	// Established: father had drive and child is female.
+	if (child_chromosome_1.containsMarkerMutation(m2,0) | child_chromosome_2.containsMarkerMutation(m2,0)) {
+		// Child is D/+
+		if (runif(1) < resistance_rate) {
+			
+			child_chromosome_1.addNewDrawnMutation(m4, 0);
+			child_chromosome_2.addNewDrawnMutation(m2, 0);
+		
+		}
+	}
+}
+
+//// FUNCTION FOR CAS9 CUTTING A TARGET CHROMOSOME.
+function (void)casCut(o<Genome>$ chromosome, f cut_rate) {
+	// If chromosome has no wild type targets to cut, cas9 does nothing.
+	if (!chromosome.containsMarkerMutation(m1,0))
+		return;
+	// In each cut phase...
+	// Check to see if cas9 cuts...
+	//not cut,return
+	if (runif(1)<cut_rate)
+		addResistanceAllele(chromosome, 0);
+
+}
+
+//// FUNCTION FOR SIMULATING HOMOLOGY DIRECTED REPAIR.
+function (void)hdr(o<Genome>$ chromosome, o<Individual>$ parent, f$ cut_rate, [l maleParent=F]) {
+	// If chromosome has no wild type targets to cut, cas9 does nothing.
+	if (!chromosome.containsMarkerMutation(m1,0))
+		return;
+	
+	if (runif(1) < cut_rate){
+		// Check to see if homing succeeds.
+		if (runif(1) < BASELINE_HOMING_SUCCESS_RATE)
+			chromosome.addNewDrawnMutation(m2, 0);
+		else {
+			// A small percentage of of individuals repair the chromosome with partial HDR,
+			// resulting in the entire section of the chromosome becoming a resistance allele.
+			if (runif(1) < PARTIAL_HDR_RATE) {
+				//swt edit ,raw is : if (runif(1) < total_r1_rate & (HAPLOLETHAL_DRIVE | RECESSIVE_LETHAL_DRIVE))
+				if (runif(1) < PARTIAL_HDR_R1_RATE)
+					chromosome.addNewDrawnMutation(m3, 0);
+				else
+					chromosome.addNewDrawnMutation(m4, 0);
+			}
+			// If neither homing nor partial HDR occur, normal repair happens.
+			else {
+				// If just one cut was made, create an R1 or R2 resistance allele.
+				addResistanceAllele(chromosome, 0);
+			}
+		}
+	}
+}
+
+//// HELPER FUNCTION TO OVERWRITE ONE GENOME WITH ANOTHER.
+function (void)copy_genome(o<Genome>$ source, o<Genome>$ destination) {
+	m1_loci = source.positionsOfMutationsOfType(m1);
+	m2_loci = source.positionsOfMutationsOfType(m2);
+	m3_loci = source.positionsOfMutationsOfType(m3);
+	m4_loci = source.positionsOfMutationsOfType(m4);
+	m5_loci = source.positionsOfMutationsOfType(m5);
+	m6_loci = source.positionsOfMutationsOfType(m6);
+	m7_loci = source.positionsOfMutationsOfType(m7);
+	
+	for (i in seqAlong(m1_loci))
+		destination.addNewDrawnMutation(m1, m1_loci[i]);
+	for (i in seqAlong(m2_loci))
+		destination.addNewDrawnMutation(m2, m2_loci[i]);
+	for (i in seqAlong(m3_loci))
+		destination.addNewDrawnMutation(m3, m3_loci[i]);
+	for (i in seqAlong(m4_loci))
+		destination.addNewDrawnMutation(m4, m4_loci[i]);
+	for (i in seqAlong(m5_loci))
+		destination.addNewDrawnMutation(m5, m5_loci[i]);
+	for (i in seqAlong(m6_loci))
+		destination.addNewDrawnMutation(m6, m6_loci[i]);
+	for (i in seqAlong(m7_loci))
+		destination.addNewDrawnMutation(m7, m7_loci[i]);
+}
+
+//// GENE DRIVE IMPLEMENTATION RULES THAT OCCUR IN EVERY CHILD.
+species vector 1: modifyChild() {
+	// Set the childs chromosome 2 to the chromosome actually inherited from the father.
+	maternal = asInteger(parent1.tag / 10);
+	paternal = parent1.tag - 10 * maternal;
+	
+	
+	if (runif(1) < 0.5){
+		// Child inherits father's maternal chromosome.
+		if (maternal == 1){}
+		else if (maternal == 2)
+			child.genome2.addNewDrawnMutation(m2, 0);
+		else if (maternal == 4)
+			child.genome2.addNewDrawnMutation(m4, 0);
+		else if (maternal == 3)
+			child.genome2.addNewDrawnMutation(m3, 0);
+	}
+	else {
+		// Child inherits father's paternal chromosome.
+		if (paternal == 1){}
+		else if (paternal == 2)
+			child.genome2.addNewDrawnMutation(m2, 0);
+		else if (paternal == 4)
+			child.genome2.addNewDrawnMutation(m4, 0);
+		else if (paternal == 3)
+			child.genome2.addNewDrawnMutation(m3, 0);
+	}
+	child.setValue("MALARIA",1);
+	//swt edit every baby is healthy
+	if (!MALE_ONLY_PROMOTER&(parent1.genome1.containsMarkerMutation(m2,0)|parent1.genome2.containsMarkerMutation(m2,0))){
+		germline(child.genome1, parent1, GERMLINE_RESISTANCE_CUT_RATE_F);
+		hdr(child.genome1, parent1, HOMING_PHASE_CUT_RATE_F);
+		germline(child.genome1, parent1, LATE_GERMLINE_RESISTANCE_CUT_RATE_F);
+		// Apply effects that happen in the embryo.
+		embryo(child.genome1, child.genome2, parent1, EMBRYO_RESISTANCE_CUT_RATE_F);
+	}
+	// If the drive is sex linked, force daughters to inherit father's x and sons to inherit father's y:
+	if(maternal==2|paternal==2){
+		// Apply effects that happen in the germline.
+		// First, resistance alleles form.		
+		germline(child.genome2, parent1, GERMLINE_RESISTANCE_CUT_RATE_M, maleParent=T);
+		// Next, homology directed repair allows for homing to occur.			
+		hdr(child.genome2, parent1, HOMING_PHASE_CUT_RATE_M, maleParent=T);
+		// Then additional resistance alleles form.
+		germline(child.genome2, parent1, LATE_GERMLINE_RESISTANCE_CUT_RATE_M, maleParent=T);
+		if (child.sex == F)
+			male_deposition(child.genome1, child.genome2, parent1, EMBRYO_RESISTANCE_CUT_RATE_M);
+	}
+	
+	//weitang sun move the tag and tagF formation to early,because child.tag and tagF should be used to label its habitat. 
+	
+	//swt add about haplolethal and recessive lethal drive
+	if(RECESSIVE_LETHAL_DRIVE){
+		if (child.genome1.containsMarkerMutation(m4,0)&child.genome2.containsMarkerMutation(m4,0)){
+			return F;}
+	}
+	if(HAPLOLETHAL_DRIVE){
+		if (child.genome1.containsMarkerMutation(m4,0)|child.genome2.containsMarkerMutation(m4,0))
+			return F;
+	}
+	if(RECESSIVE_LETHAL_SUPPRESSION_DRIVE){
+		if(child.countOfMutationsOfType(m2)+child.countOfMutationsOfType(m4)==2)
+			return F;
+	}
+	if (REPRISING_BOUNDARIES) {
+		do {
+			new_x = parent1.x + rnorm(1, 0, DISTANCE) / SIM_BOUND;
+			new_y = parent1.y + rnorm(1, 0, DISTANCE) / SIM_BOUND;
+		}
+		while (!child.subpopulation.pointInBounds(c(new_x, new_y)));
+		child.setSpatialPosition(c(new_x, new_y));
+	}
+	else {
+		// Toroidal movement.
+		new_x = parent1.x + rnorm(1, 0, DISTANCE) / SIM_BOUND;
+		new_y = parent1.y + rnorm(1, 0, DISTANCE) / SIM_BOUND;
+		child.setSpatialPosition(p1.pointPeriodic(c(new_x, new_y)));
+	}
+	child.tag = 0;
+	child.tagF = 1.0;
+	child.setValue("competative_pressure", 0);
+	child.setValue("foraged_nodes", 0);
+	return T;
+}
+
+//// RULES FOR FITNESS BASED ON GENOTYPE.
+function (f$)genotypeFitness(o<Individual>$ ind) {
+	// Representation of the value of the two chromosomes.
+	// Check both chromosomes for drive and type 2 resistance allele.
+	// These are the only variants that affect fitness.
+	drive_count = ind.countOfMutationsOfType(m2);
+	if (drive_count==1)
+		return DX_FITNESS_VALUE;
+	else if (drive_count==2)
+		return DD_FITNESS_VALUE;
+	else
+		return 1.0;
+	// Return fitness for individual with this genotype.
+}
+
+//// RULES FOR FITNESS AFFECT FECUNDITY BASED ON GENOTYPE.
+function (f$)fecundityFitness(o<Individual>$ ind) {
+	if (!(RECESSIVE_STERILE_SUPPRESSION_DRIVE|RECESSIVE_FEMALE_STERILE_SUPPRESSION_DRIVE)){
+		return 1.0;
+	}
+	fecundity = 1.0;
+	somatic = SOMATIC_FITNESS_MULTIPLIER_F;
+	// check two chromosomes:
+	drive_on_1 = ind.genome1.containsMarkerMutation(m2,0);
+	drive_on_2 = ind.genome2.containsMarkerMutation(m2,0);
+	res2_on_1 = ind.genome1.containsMarkerMutation(m4,0);
+	res2_on_2 = ind.genome2.containsMarkerMutation(m4,0);
+	wt_1 = ind.genome1.containsMarkerMutation(m1,0);
+	wt_2 = ind.genome2.containsMarkerMutation(m1,0);
+	
+	if (drive_on_1 & wt_2)
+		fecundity = somatic;
+	if (drive_on_2 & wt_1)
+		fecundity = somatic;
+	if (drive_on_1 & drive_on_2)
+		fecundity = 0.0;
+	
+	return fecundity;
+}
+
+//// FUNCTION FOR EVALUATING INFERTILITY CAUSED BY SUPRESSION DRIVES.
+function (logical)isInfertile(o<Individual>$ ind) {
+	dr_count = sum(ind.genomes.containsMarkerMutation(m2,0));
+	r2_count = sum(ind.genomes.containsMarkerMutation(m4,0));
+	if (RECESSIVE_STERILE_SUPPRESSION_DRIVE)
+		if (dr_count + r2_count == 2)
+			return T;
+	if (ind.sex == "F") {
+		if (RECESSIVE_FEMALE_STERILE_SUPPRESSION_DRIVE)
+			if (dr_count + r2_count == 2)
+				return T;
+	
+	}
+	return F;
+}
+
+function (integer)setTag(o<Individual>$ ind) {
+	new_tag = 0;
+	if (ind.genome1.containsMarkerMutation(m1,0))
+		new_tag = new_tag + 10;
+	if (ind.genome1.containsMarkerMutation(m2,0))
+		new_tag = new_tag + 20;
+	if (ind.genome1.containsMarkerMutation(m3,0))
+		new_tag = new_tag + 30;
+	if (ind.genome1.containsMarkerMutation(m4,0))
+		new_tag = new_tag + 40;
+	if (ind.genome2.containsMarkerMutation(m1,0))
+		new_tag = new_tag + 1;
+	if (ind.genome2.containsMarkerMutation(m2,0))
+		new_tag = new_tag + 2;
+	if (ind.genome2.containsMarkerMutation(m3,0))
+		new_tag = new_tag + 3;
+	if (ind.genome2.containsMarkerMutation(m4,0))
+		new_tag = new_tag + 4;
+	return new_tag;
+}
+
+//SEASONAL Function
+function (float)StrongSEASONAL(integer gen, integer duration) {
+	now_gen = gen % 52;
+	if ((now_gen < 25.5-duration/2)|(now_gen > 25.5+duration/2))
+		return 0.0;
+	else
+		return 0.5+cos((now_gen-25.5)*2*PI/duration)/2;
+
+}
+
+function (float)LessSEASONAL(integer gen) {
+	now_gen = gen % 52;
+	return cos((now_gen-51/4)*2*PI/51);
+}
+
+//// REPRODUCTION RULES FOR EACH FEMALE.
+species vector reproduction(p1, "F") {
+	if (isInfertile(individual))
+		return;
+	
+	// First, evaluate whether reproduction is suppressed by a population suppression drive,
+	// Then, select a mate based on fitness, then generate offspring.
+	if (individual.tag == 0 | runif(1) < REMATE_CHANCE) {
+		// Individual has not yet mated.
+		neighbors = i1.nearestNeighborsOfPoint(c(individual.x,individual.y),p2,p2.individualCount);
+		
+		if (size(neighbors) > 0) { // If no mates are in mate detection range, cannot mate.
+			// Females choose a random provisional mate, but make a final mating decision based on the
+			// attractiveness of that mate, as determined by the fitness of the mate. If a mate is
+			// rejected, the female tries again, up to a maximum number of tries, after which she gives up.
+			attempt_no = 0;
+			found_mate = F;
+			while (1) {
+				mate_no = 0;
+				if (size(neighbors) > 1)
+					mate_no = rdunif(1, max=size(neighbors) - 1);
+				selected_mate = neighbors[mate_no];
+				// Determine attractiveness of potential mate.
+				mate_attractiveness = 1;
+				// Determine if this mate is chosen, based on attractiveness.
+				if (runif(1) < mate_attractiveness) {
+					found_mate = T;
+					break;  // Select this mate.
+				}
+				// After ten candidates fail, female gives up.
+				attempt_no = attempt_no + 1;
+				if (attempt_no == MAX_ATTEMPTS_TO_FIND_SUITABLE_MATE)
+					break;
+			}
+			if (found_mate) {
+				// Mate has now been selected.
+				// Check to see if mate is infertile because of drive mechanics.
+				if (isInfertile(selected_mate)) {
+					individual.tagF = 100.0;
+					individual.tag = setTag(selected_mate);
+					return;
+				}
+				// Check to see if male somatic fitness penalty will decrease number of offspring. Fecundity effected only in offspring of D/+ males.
+				// tagF holds the somatic fitness multiplier of the mate.
+				if (selected_mate.countOfMutationsOfType(m1) & selected_mate.countOfMutationsOfType(m2))
+					individual.tagF = SOMATIC_FITNESS_MULTIPLIER_M;
+				// The tag stores info about the mate's genotype.                 
+				
+				individual.tag = setTag(selected_mate);
+			}
+		}
+	}
+	
+	// Check to see if mate was infertile because of drive mechanics.
+	
+	
+	if (individual.tag != 0) {
+		// Individual has mated, and may lay eggs.
+		// Females don't always lay eggs:
+		//about mosquito bite
+		if(runif(1) > WANT_TO_BITE_RATE){
+			return;
+		}
+		
+		
+		x_po=individual.x;
+		y_po=individual.y;
+		humans=i3.nearestNeighborsOfPoint(c(x_po,y_po),p10,HUMAN_POPULATION);
+		n_humans=length(humans);
+		if (n_humans==0){
+			if (runif(1)>ANIMAL_BITE_RATE)
+				return;
+		}
+		//doesnt find any food
+		else{
+			human=humans[rdunif(1,0,n_humans-1)];
+			
+			//swt edit: malaria transmission
+			human_is_sensitive=human.getValue("MALARIA")==1;
+			human_has_malaria=human.getValue("MALARIA")==4;
+			mosquito_has_malaria=individual.getValue("MALARIA")==4;
+			mosquito_is_healthy=individual.getValue("MALARIA")==1;
+			human_is_resistance=human.getValue("MALARIA")==3;
+			/*if drive influence the transmission use it
+			mosquito_has_drive1=individual.genome1.containsMarkerMutation(m2,0);
+			mosquito_has_drive2=individual.genome2.containsMarkerMutation(m2,0);
+			
+			if (mosquito_has_malaria&human_is_sensitive){
+				if (mosquito_has_drive1&mosquito_has_drive2){
+					if (runif(1)<MALARIA_SENSITIVE*DRIVE_HOMOZYGOUS_OUTPUT_RATE){
+						human.setValue("MALARIA",2);
+						human.tag=HUMAN_INCUBATION_PERIOD;
+					}
+				}
+				else if (mosquito_has_drive1|mosquito_has_drive2){
+					if (runif(1)<MALARIA_SENSITIVE*DRIVE_HETEROZYGOUS_OUTPUT_RATE){
+						human.setValue("MALARIA",2);
+						human.tag=HUMAN_INCUBATION_PERIOD;
+					}
+				}
+				else
+					if (runif(1)<MALARIA_SENSITIVE){
+					human.setValue("MALARIA",2);
+					human.tag=HUMAN_INCUBATION_PERIOD;
+				}
+			}
+			if (human_has_malaria&mosquito_is_healthy){
+				if (mosquito_has_drive1&mosquito_has_drive2){
+					if (runif(1)<MALARIA_TAKEIN_RATE*DRIVE_HOMOZYGOUS_TAKEIN_RATE)
+						individual.setValue("MALARIA",2);
+				}
+				else if (mosquito_has_drive1|mosquito_has_drive2){
+					if (runif(1)<MALARIA_TAKEIN_RATE*DRIVE_HETEROZYGOUS_TAKEIN_RATE)
+						individual.setValue("MALARIA",2);
+				}
+				else
+					if (runif(1)<MALARIA_TAKEIN_RATE)
+					individual.setValue("MALARIA",2);
+			}
+			*/
+			
+			//if drive doesn't influence the transmission ,use it
+			if (mosquito_has_malaria&human_is_sensitive&runif(1)<MALARIA_SENSITIVE){
+					human.setValue("MALARIA",2);
+					human.tag=HUMAN_INCUBATION_PERIOD;//use tag to store incubation period
+            }
+			if (mosquito_has_malaria&human_is_resistance)
+				if(runif(1)<MALARIA_SENSITIVE*(1-human.tag/human.getValue("MALARIA_RESISTANCE"))){
+					human.setValue("MALARIA",2);
+					human.tag=HUMAN_INCUBATION_PERIOD;//use tag to store incubation period
+			    }
+			if (human_has_malaria&mosquito_is_healthy&runif(1)<MALARIA_TAKEIN_RATE){
+				individual.setValue("MALARIA",2);
+			}
+		}
+		if (individual.tagF == 100.0)
+			return;
+		// Check to see if this female is infertile because of drive mechanics:
+		
+		
+		selected_mate = sample(p3.individuals, 1);
+		
+		// Actual mate genome.
+		maternal = asInteger(individual.tag / 10);
+		paternal = individual.tag - 10 * maternal;
+		
+		// Fecundity is based on both the crowding/competition in the system, as well as female fitness.
+		// Number of offspring number based on binomial distribution.
+		num_offspring = rpois(1, BETAMAX * 2);
+		num_offspring = num_offspring * fecundityFitness(individual)* individual.tagF;
+		
+		num_offspring = asInteger(round(num_offspring));
+		for (i in seqLen(num_offspring)) {
+			// Add offspring to the subpopulation.
+			if (maternal == 2 | paternal == 2)
+				// Add individuals with a biased sex ratio if mate had x-shredder.
+				p5.addCrossed(individual, selected_mate, DRIVE_SEX_RATIO);
+			else
+				p5.addCrossed(individual, selected_mate);
+		}
+	}
+}
+
+//// PRINT THE PARAMS USED IN THE RUN //YHA edit
+ticks all 1 early() {
+	vector.tag=-1;
+	
+	cat("PARAMS::");
+	//cat("NO_DROP"+":"+NO_DROP+";");
+	//cat("ENDTIME"+":"+ENDTIME+";");
+	//cat("NODES_PER_AREA"+":"+NODES_PER_AREA+";");
+	cat("malaria_takein_rate"+":"+MALARIA_TAKEIN_RATE+";");
+	cat("malaria_sensitive"+":"+MALARIA_SENSITIVE+";");
+	//cat("SEASONAL"+":"+SEASONAL+";");
+	cat("distance"+":"+DISTANCE+";");
+	cat("remate_chance"+":"+REMATE_CHANCE+";");
+	cat("want_to_bite_rate"+":"+WANT_TO_BITE_RATE+";");
+	cat("animal_bite_rate"+":"+ANIMAL_BITE_RATE+";");
+	cat("dd_fitness_value"+":"+DD_FITNESS_VALUE+";");
+	cat("somatic_fitness_multiplier_f"+":"+SOMATIC_FITNESS_MULTIPLIER_F+";");
+	cat("grc_beta"+":"+GRC_BETA+";");
+	cat("drive_conversion"+":"+DRIVE_CONVERSION+";");
+	cat("erc_rate_f"+":"+EMBRYO_RESISTANCE_CUT_RATE_F+";");
+	cat("r1_occurrence_rate"+":"+R1_OCCURRENCE_RATE+";");
+	cat("low_density_growth_rate"+":"+LOW_DENSITY_GROWTH_RATE+";");
+	cat("less_seasonal_amplitude"+":"+LESS_SEASONAL_AMPLITUDE+";");
+	cat("cure_week"+":"+CURE_WEEK+";");
+	cat("immunity"+":"+IMMUNITY+";");
+	cat("adult_female_density"+":"+ADULT_FEMALES_DENSITY+";");
+	cat("human_density"+":"+HUMAN_DENSITY+";");
+	cat("SIM_BOUND"+":"+SIM_BOUND+";");
+	
+	
+	catn();
+}
+
+
+//// START THE SIMULATION BY ADDING AN INITIAL WILD POPULATION.
+ticks all 1 early() {
+	hex_side_length = sqrt(4 * FORAGING_AREA / NODES_PER_AREA / 6 / sqrt(3));
+	hex_height = hex_side_length * sqrt(3);
+	hexes_wide = 1 + asInteger(SIM_BOUND / (1.5 * hex_side_length));
+	even_hexes_wide = asInteger(hexes_wide / 2);
+	odd_hexes_wide = asInteger(hexes_wide / 2);
+	if (hexes_wide % 2 != 0)
+		even_hexes_wide = even_hexes_wide + 1;
+	hexes_high = asInteger(2 *SIM_BOUND/ hex_height) + 1;
+	if (hexes_high % 2 == 0)
+		num_resource_nodes = hexes_high / 2 * even_hexes_wide + hexes_high / 2 * odd_hexes_wide;
+	else
+		num_resource_nodes = (asInteger(hexes_high / 2) + 1) * even_hexes_wide + asInteger(hexes_high / 2) * odd_hexes_wide;
+	xmax = (hexes_wide - 1) * 1.5 * hex_side_length;
+	ymax = (hexes_high - 1) * hex_height / 2;
+	// Next initialize the resource node population and place them at the centerpoints of the hexagonal grid.
+	resource_node.addSubpop("p4", asInteger(num_resource_nodes));
+	p4.setSpatialBounds(c(c(0,0),c(SIM_BOUND,SIM_BOUND)));
+	x = -1;
+	y = -1;
+	for (node in p4.individuals) {
+		x = x + 1;
+		if (y % 2 == 0)
+			x = x % even_hexes_wide;
+		if (y % 2 != 0)
+			x = x % odd_hexes_wide;
+		if (x == 0)
+			y = y + 1;
+		x_coord = x * 3 * hex_side_length;
+		total_x_index = 2 * x;
+		if (y % 2 != 0) {
+			x_coord = x_coord + 1.5 * hex_side_length;
+			total_x_index = total_x_index + 1;
+		}
+		y_coord = y * hex_height / 2;
+		node.setSpatialPosition(c(x_coord, y_coord));
+		
+		// tag will denote edge resource nodes.
+		node.tag = 1;
+		
+		// Resources on the edge of the modeled area have their area cut in half.
+		// Thus, they should also only have half as many resource nodes.
+		if (total_x_index == 0 | total_x_index == hexes_wide - 1)
+			node.tag = 2;
+		if (y == 0 | y == hexes_high - 1)
+			node.tag = 2;
+	}
+	
+	
+	// Start with a population of wild type flies.
+	vector.addSubpop("p1", asInteger(CAPACITY), MALE_AGE/(FEMALE_AGE+MALE_AGE));
+	p1.setSpatialBounds(c(c(0,0),c(SIM_BOUND,SIM_BOUND)));
+	
+	p1.individuals.genomes.addNewDrawnMutation(m1, 0);
+	p1.individuals.setValue("MALARIA",1);
+	target_species = p1.individuals;
+	//target_species.color = "white";
+	all = p1.individuals;
+	FEMALE_AGEs = size(INITIAL_FEMALE_AGE_DISTRIBUTION) - 1;
+	MALE_AGEs = size(INITIAL_MALE_AGE_DISTRIBUTION) - 1;
+	all.setValue("competative_pressure", 0);
+	all.setValue("foraged_nodes", 0);
+	all.color = "white";
+	for (ind in all) {
+		if (ind.sex == "F") {
+			ind.age = sample(0:FEMALE_AGEs, 1, F, INITIAL_FEMALE_AGE_DISTRIBUTION);
+		}
+		else {
+			ind.age = sample(0:MALE_AGEs, 1, F, INITIAL_MALE_AGE_DISTRIBUTION);
+		}
+	}
+	all.x = runif(p1.individualCount, 0, SIM_BOUND);
+	all.y = runif(p1.individualCount, 0, SIM_BOUND);
+	all.tag = 0;
+	all.tagF = 1.0;
+	new_larvae = all[all.age==0];
+	old_larvae = all[all.age==1];
+	
+	vector.addSubpop("p5", 0);
+	p5.setSpatialBounds(c(c(0,0),c(SIM_BOUND,SIM_BOUND)));
+	p5.takeMigrants(new_larvae);
+	p5.takeMigrants(old_larvae);
+	
+	vector.addSubpop("p2", 0);
+	
+	p2.setSpatialBounds(c(c(0,0),c(SIM_BOUND,SIM_BOUND)));
+	p2.takeMigrants(p1.individuals[p1.individuals.sex=='M']);
+	
+	
+	vector.addSubpop("p3", 1, 1.0);
+	p3.individuals.age = 5200;
+	p3.genomes.addNewDrawnMutation(m1,0);
+	p3.individuals[0].setValue("MALARIA",1);
+	p3.individuals.x = 0.5;
+	p3.individuals.y = 0.5;
+	//p3.individuals.color = "grey";
+	
+	
+	
+	host.addSubpop("p10",HUMAN_POPULATION);
+	p10.setSpatialBounds(c(c(0,0),c(SIM_BOUND,SIM_BOUND)));
+	p10.individuals.age = 1;
+	humans=p10.individuals;
+	//set the malaria situation for every one,healthy at first
+	p10.individuals.setValue("MALARIA",1);
+    
+	//swt add about the distribution of initial malaria period
+	initial_malaria=c(0);
+	//
+	for (generation in (3*CURE_WEEK):1){
+		f=exp(generation*log(CURE_WEEK))*exp(-CURE_WEEK);
+		for (i in 1:generation){
+			f=f/i;
+		}
+		f=f/CURE_WEEK;
+		initial_malaria=c(f+initial_malaria[0],initial_malaria);
+	}
+	
+	//swt add about the distribution of initial resistance period
+	if (IMMUNITY>0){
+		initial_resistance=c(0);
+		for (generation in (3*IMMUNITY):1){
+			f=exp(generation*log(IMMUNITY))*exp(-IMMUNITY);
+			for (i in 1:generation){
+				f=f/i;
+			}
+			f=f/IMMUNITY;
+			initial_resistance=c(f+initial_malaria[0],initial_resistance);
+		}
+	}
+	for (human in humans){
+		temp_number=runif(1);
+		if (temp_number<INITIAL_HUMAN_MALARIA_FREQUENCY){
+			human.setValue("MALARIA",4);
+			tmp=runif(1);
+			human.tag=CURE_WEEK;
+			for (i in 1:length(initial_malaria)){
+				if (tmp<=initial_malaria[i-1]){
+					human.tag=i-1;
+					break;
+				}
+				else{
+					tmp=tmp-initial_malaria[i-1];
+				}
+			
+			}
+		}
+		else if (IMMUNITY>0&temp_number<INITIAL_HUMAN_RESISTANT_FREQUENCY+INITIAL_HUMAN_MALARIA_FREQUENCY){
+			human.setValue("MALARIA",3);
+			tmp=runif(1);
+			human.tag=IMMUNITY;
+			for (i in 1:length(initial_resistance)){
+				if (tmp<=initial_resistance[i-1]){
+					human.tag=i-1;
+					break;
+				}
+				else{
+					tmp=tmp-initial_resistance[i-1];
+				}
+			}
+			human.setValue("MALARIA_RESISTANCE",human.tag);
+		
+		}
+		else if (temp_number<INITIAL_HUMAN_CARRIER_FREQUENCY+INITIAL_HUMAN_RESISTANT_FREQUENCY+INITIAL_HUMAN_MALARIA_FREQUENCY){
+			human.setValue("MALARIA",2);
+			human.tag=asInteger(floor(HUMAN_INCUBATION_PERIOD*runif(1)+1));//use tag to store incubation period
+		
+		
+		}
+	}	
+	humans.x = runif(p10.individualCount, 0.0, SIM_BOUND);
+	humans.y = runif(p10.individualCount, 0.0, SIM_BOUND);
+	
+	vector.setValue("start_gc_tracking", F);
+
+
+}
+
+//// DROP A GROUP OF MODIFIED INDIVIDUALS INTO THE POPULATION.
+ticks all 10 early() {
+	if (NO_DROP)
+		return;
+	// Add a drop of modified individuals to p1.
+	
+	vector.addSubpop("p9", asInteger(DROP_SIZE*CAPACITY));
+	p9.setSpatialBounds(c(c(0,0),c(SIM_BOUND,SIM_BOUND)));
+	drop = p9.individuals;
+	drop.age = 2;
+	drop.tag = 0;
+	drop.tagF = 1.0;
+	drop.setValue("competative_pressure", 0);
+	drop.setValue("foraged_nodes", 0);
+	drop.setValue("MALARIA",1);
+	//drop.color = "red";  //cyan
+	for (ind in drop) {
+		if (REPRISING_BOUNDARIES) {
+			do {
+				ind_x = SIM_BOUND/2 + rnorm(1, 0, DROP_RADIUS);
+				ind_y = SIM_BOUND/2 + rnorm(1, 0, DROP_RADIUS);
+			}
+			while (!ind.subpopulation.pointInBounds(c(ind_x, ind_y)));
+			ind.setSpatialPosition(c(ind_x, ind_y));
+		}
+		else {
+			// Toroidal placement.
+			ind_x = SIM_BOUND/2 + rnorm(1, 0, DROP_RADIUS);
+			ind_y = SIM_BOUND/2 + rnorm(1, 0, DROP_RADIUS);
+			ind.setSpatialPosition(p1.pointPeriodic(c(ind_x, ind_y)));
+		}
+	}
+	
+	// Now set the drop individuals to the correct genotypes:
+	
+	drop.genomes.addNewDrawnMutation(m2, 0);
+	
+	// For heterozygous drop, one of the chromosomes is set to wild type:
+	if (HETEROZYGOUS_DROP)
+		
+		drop.genome2.addNewDrawnMutation(m1, 0);
+	
+	// Now that genes have been set, move all the individuals from the drop into p1:
+	p1.takeMigrants(drop[drop.sex=='F']);
+	p2.takeMigrants(drop[drop.sex=='M']);
+	p9.removeSubpopulation();
+	if (TRACK_BY_CELL)
+		vector.setValue("start_gc_tracking", F); //don't start until number of wt alleles falls below 80% eq
+}
+
+//// AGE BASED SURVIVAL RULES / VIABILITY COMPETITION.
+ticks all early() {
+	if ((SEASONAL)&(vector.cycle>15)) {
+		if (STRONG_SEASONAL) {
+			now_gen = asInteger((vector.cycle - 15) % 52);
+			NUM_ADULT_FEMALES=AVERAGE_NUM_ADULT_FEMALES*(1 + STRONG_SEASONAL_AMPLITUDE * StrongSEASONAL(now_gen,STRONG_SEASONAL_DURATION));
+			FE_COMPETITOR=AVERAGE_FE_COMPETITOR *(1+ STRONG_SEASONAL_AMPLITUDE * StrongSEASONAL(now_gen,STRONG_SEASONAL_DURATION));
+		}
+		
+		else if (LESS_SEASONAL) {
+			now_gen = asInteger((vector.cycle - 15) % 52);
+			NUM_ADULT_FEMALES=AVERAGE_NUM_ADULT_FEMALES*(1+LESS_SEASONAL_AMPLITUDE * LessSEASONAL(now_gen));
+			FE_COMPETITOR=AVERAGE_FE_COMPETITOR*(1+ LESS_SEASONAL_AMPLITUDE * LessSEASONAL(now_gen));
+		
+		}
+		
+		TOTAL_FEMALES= NUM_ADULT_FEMALES + (FRACTION_OF_FEMALES_THAT_REPRODUCE_PER_WEEK * BETAMAX+ femaleOLD*(FEMALE_AGE-1))*NUM_ADULT_FEMALES;
+		CAPACITY=TOTAL_FEMALES + TOTAL_FEMALES*CALC_INITIAL_MALE_AGE/CALC_INITIAL_FEMALE_AGE;
+		defineGlobal("LATE_CAPACITY",CAPACITY-NUM_ADULT_FEMALES*FRACTION_OF_FEMALES_THAT_REPRODUCE_PER_WEEK*BETAMAX*2);
+		defineGlobal("EXPECTED_COMPETITON", COMPETITION_DIST^2 * PI/ SIM_BOUND^2 * (NUM_ADULT_FEMALES * (2 * BETAMAX * FRACTION_OF_FEMALES_THAT_REPRODUCE_PER_WEEK + 2 * femaleOLD * (FEMALE_AGE-1) * OLD_LARVA_COMPETITION_FACTOR)));
+	
+	
+	}
+
+	
+	female = vector.subpopulations[0].individuals;  //p1
+	larvae = p5.individuals;
+
+	i2.evaluate(c(p5, p4));
+	larvae = p5.individuals;
+	adults = p1.individuals;
+	new_larvae = larvae[larvae.age == 0];
+	old_larvae = larvae[larvae.age == 1];
+	f_larvae = sum(larvae[larvae.sex == "F"].age==0);
+	defineGlobal("ACTUAL_LARVAE", f_larvae);
+	
+	// Use resource nodes to measure landscape density.
+	for (node in p4.individuals) {
+		// First count the number of individuals feeding from this node.
+		customers = i2.nearestNeighbors(node, p5.individualCount, p5);
+		new_larvae=customers[customers.age==0];
+		new_larvae_count = size(new_larvae);
+		old_larvae_count = size(customers)-new_larvae_count;
+		customer_weight = new_larvae_count + old_larvae_count * OLD_LARVA_COMPETITION_FACTOR;
+		for (ind in new_larvae) {
+			// Increment counter for the number of competetors.
+			ind.setValue("competative_pressure", ind.getValue("competative_pressure") + customer_weight);
+			// Increment counter for the number of nodes that this individual forages from.
+			ind.setValue("foraged_nodes", ind.getValue("foraged_nodes") + 1);
+		}
+	}
+	
+	for (ind in larvae) {
+		if (ind.age == 0) {
+			competition = ind.getValue("competative_pressure") / ind.getValue("foraged_nodes");
+			competition_ratio = competition / EXPECTED_COMPETITON;
+			ind.fitnessScaling = genotypeFitness(ind)* FITNESS_CONSTANT / ((LOW_DENSITY_GROWTH_RATE - 1) * competition_ratio + 1);
+		}
+		else
+			ind.fitnessScaling = 1.0;
+	}
+	
+	
+	for (ind in female) {
+		if (ind.sex == "M"){
+			ind.fitnessScaling = (MALE_AGE - ind.age) / (MALE_AGE+1 - ind.age);
+			print("malehere");
+		}
+		else
+			ind.fitnessScaling = (FEMALE_AGE - ind.age) / (FEMALE_AGE+1 - ind.age);
+		// Movement.
+		if (REPRISING_BOUNDARIES) {
+			do {
+				new_x = ind.x + rnorm(1, 0, SIGMA);
+				new_y = ind.y + rnorm(1, 0, SIGMA);
+			}
+			
+			while (!ind.subpopulation.pointInBounds(c(new_x, new_y)));
+			ind.setSpatialPosition(c(new_x, new_y));
+		}
+		else {
+			// Toroidal movement.
+			new_x = ind.x + rnorm(1, 0, SIGMA);
+			new_y = ind.y + rnorm(1, 0, SIGMA);
+			ind.setSpatialPosition(p1.pointPeriodic(c(new_x, new_y)));
+		}
+	
+	}
+	males=p2.individuals;
+	for (ind in males) {
+		if (ind.sex == "M")
+			ind.fitnessScaling = (MALE_AGE - ind.age) / (MALE_AGE+1 - ind.age);
+		else{
+			ind.fitnessScaling = (FEMALE_AGE - ind.age) / (FEMALE_AGE+1 - ind.age);
+			print('FEMALEHERE');}
+		// Movement.
+		if (REPRISING_BOUNDARIES) {
+			do {
+				new_x = ind.x + rnorm(1, 0, SIGMA);
+				new_y = ind.y + rnorm(1, 0, SIGMA);
+			}
+			
+			while (!ind.subpopulation.pointInBounds(c(new_x, new_y)));
+			ind.setSpatialPosition(c(new_x, new_y));
+		}
+		else {
+			// Toroidal movement.
+			new_x = ind.x + rnorm(1, 0, SIGMA);
+			new_y = ind.y + rnorm(1, 0, SIGMA);
+			ind.setSpatialPosition(p2.pointPeriodic(c(new_x, new_y)));
+		}
+	
+	}
+	
+	p1.takeMigrants(old_larvae[old_larvae.sex=='F']);
+	p2.takeMigrants(old_larvae[old_larvae.sex=='M']);
+}
+
+ticks all late(){
+	individuals=p1.individuals;
+	adult_females=individuals[individuals.age>=2];
+	//swt edit about malaria carrier become patient
+	for (ind in adult_females){
+		if (ind.getValue("MALARIA")==3){
+			ind.setValue("MALARIA",4);
+		}
+		if (ind.getValue("MALARIA")==2){
+			if (ind.genome1.containsMarkerMutation(m2,0)&ind.genome2.containsMarkerMutation(m2,0)){
+				if (runif(1)<MALARIA_ACTIVE_MOSQUITO_WEEK1*DRIVE_HOMOZYGOUS_ACTIVE_RATE)
+					ind.setValue("MALARIA",4);
+				else
+					ind.setValue("MALARIA",3);
+			}
+			else if (ind.genome1.containsMarkerMutation(m2,0)|ind.genome2.containsMarkerMutation(m2,0)){
+				if (runif(1)<MALARIA_ACTIVE_MOSQUITO_WEEK1*DRIVE_HETEROZYGOUS_ACTIVE_RATE)
+					ind.setValue("MALARIA",4);
+				else
+					ind.setValue("MALARIA",3);
+			
+			}
+			else{
+				if (runif(1)<MALARIA_ACTIVE_MOSQUITO_WEEK1)
+					ind.setValue("MALARIA",4);
+				else
+					ind.setValue("MALARIA",3);
+			}
+		}
+	}
+	humans=p10.individuals;
+	
+	for (human in humans){
+	   if (human.getValue("MALARIA")==3){
+			if (human.tag==0){
+				human.setValue("MALARIA",1);
+				
+			}
+			else human.tag=human.tag-1;
+		}
+		
+		else if (human.getValue("MALARIA")==4){
+			if (human.tag==0){
+				if (IMMUNITY>0){
+					human.setValue("MALARIA",3);
+					human.tag=rpois(1,IMMUNITY);
+					human.setValue("MALARIA_RESISTANCE",human.tag);
+					if(human.tag==0)
+					human.setValue("MALARIA_RESISTANCE",human.tag+1);
+				}
+				else
+					human.setValue("MALARIA",1);
+			}
+			else
+				human.tag=human.tag-1;
+		}
+		
+		else if (human.getValue("MALARIA")==2){
+			if (human.tag==0){
+				human.setValue("MALARIA",4);
+				human.tag=rpois(1,CURE_WEEK);
+			}
+			else human.tag=human.tag-1;
+		}
+		
+	}
+
+}
+ticks all late(){
+	
+	if(vector.tag==0){
+		catn("MALARIA_ELIMILATED");
+		community.simulationFinished();
+	}
+	else if(vector.tag!=-1){
+		vector.tag=vector.tag-1;
+	}
+	catn("---");
+	
+	num_adults_female=p1.individualCount;
+	num_adults_male=p2.individualCount;
+	num_larvae=p5.individualCount;
+	num_adults=num_adults_female+num_adults_male;
+	num_all=p1.individualCount+p2.individualCount+p5.individualCount;
+	//prevent 
+	this_gen=vector.cycle;
+	
+	if(num_all==0){
+		catn("ALL_SPECIES_DISTINCT");
+		community.simulationFinished();
+		return;
+	}
+	
+	target_species=c(p1.individuals,p2.individuals,p5.individuals);
+	num_target_species=num_all;
+	
+	catn("GENERATIONS: "+this_gen);
+	
+	mos_wtwt=target_species[target_species.countOfMutationsOfType(m1)==2];
+	num_wtwt=length(mos_wtwt);
+	
+	mos_wtdr=target_species[target_species.countOfMutationsOfType(m1)==1&target_species.countOfMutationsOfType(m2)==1];
+	num_wtdr=length(mos_wtdr);
+	
+	mos_drdr=target_species[target_species.countOfMutationsOfType(m2)==2];
+	num_drdr=length(mos_drdr);
+	mos_drr1=target_species[target_species.countOfMutationsOfType(m2)==1&target_species.countOfMutationsOfType(m3)==1];
+	num_drr1=length(mos_drr1);
+	mos_drr2=target_species[target_species.countOfMutationsOfType(m2)==1&target_species.countOfMutationsOfType(m4)==1];
+	num_drr2=length(mos_drr2);
+	mos_wtr1=target_species[target_species.countOfMutationsOfType(m1)==1&target_species.countOfMutationsOfType(m3)==1];
+	num_wtr1=length(mos_wtr1);
+	mos_wtr2=target_species[target_species.countOfMutationsOfType(m1)==1&target_species.countOfMutationsOfType(m4)==1];
+	num_wtr2=length(mos_wtr2);
+	mos_r1r2=target_species[target_species.countOfMutationsOfType(m3)==1&target_species.countOfMutationsOfType(m4)==1];
+	num_r1r2=length(mos_r1r2);
+	
+	mos_r1r1=target_species[target_species.countOfMutationsOfType(m3)==2];
+	num_r1r1=length(mos_r1r1);
+	
+	mos_r2r2=target_species[target_species.countOfMutationsOfType(m4)==2];
+	num_r2r2=length(mos_r2r2);
+	
+	num_wt=num_wtwt*2+num_wtdr+num_wtr1+num_wtr2;
+	num_dr=num_wtdr+2*num_drdr+num_drr1+num_drr2;
+	num_r1=num_wtr1+num_drr1+num_r1r1*2+num_r1r2;
+	num_r2=num_wtr2+num_drr2+num_r1r2+num_r2r2*2;
+	
+	//vector output
+	
+	
+	adult_females=p1.individuals;
+	num_adult_females=length(adult_females);
+	if(num_adult_females==0){
+		num_fertile_females=0;
+		num_mos_healthy=0;
+		num_mos_carrier1=0;
+		num_mos_carrier2=0;
+		num_mos_infectious=0;
+	}
+	else{
+		if(RECESSIVE_STERILE_SUPPRESSION_DRIVE|RECESSIVE_FEMALE_STERILE_SUPPRESSION_DRIVE)
+			num_fertile_females=length(adult_females[adult_females.countOfMutationsOfType(m2)+adult_females.countOfMutationsOfType(m4)!=2]);
+		else
+			num_fertile_females=length(adult_females);
+		mos_healthy=adult_females[adult_females.getValue("MALARIA")==1];
+		mos_carrier1=adult_females[adult_females.getValue("MALARIA")==2];
+		mos_carrier2=adult_females[adult_females.getValue("MALARIA")==3];
+		mos_infectious=adult_females[adult_females.getValue("MALARIA")==4];
+		num_mos_healthy=length(mos_healthy);
+		num_mos_carrier1=length(mos_carrier1);
+		num_mos_carrier2=length(mos_carrier2);
+		num_mos_infectious=length(mos_infectious);
+	}
+	//human output 
+	humans=p10.individuals;
+	peoples=p10.individualCount;
+	
+	healthy=humans[humans.getValue("MALARIA")==1];
+	num_is_healthy=length(healthy);
+	
+	patient=humans[humans.getValue("MALARIA")==4];
+	num_is_patient=length(patient);
+	
+	carrier=humans[humans.getValue("MALARIA")==2];
+	num_is_carrier=length(carrier);
+	
+	resistant=humans[humans.getValue("MALARIA")==3];
+	num_is_resistant=length(resistant);
+	
+	
+	
+	catn("POPULATIONS: "+num_all+" "+num_target_species+" "+num_adult_females+" "+num_fertile_females+" "+num_adults);
+	catn("GENOTYPES: "+num_wtwt+" "+num_wtdr+" "+num_wtr1+" "+num_wtr2+" "+num_drdr+" "+num_drr1+" "+num_drr2+" "+num_r1r1+" "+num_r1r2+" "+num_r2r2);
+	catn("GENES: "+num_wt+" "+num_dr+" "+num_r1+" "+num_r2);
+	catn("MOSQUITO_MALARIA: "+num_mos_healthy+" "+num_mos_carrier1+" "+num_mos_carrier2+" "+num_mos_infectious);
+	catn("HUMAN: "+num_is_healthy+" "+num_is_carrier+" "+num_is_patient+" "+num_is_resistant);
+	if(SIGHT){
+		mos_r2r2.color="black";
+		mos_r1r1.color="green";
+		mos_r1r2.color="green";
+		mos_wtr2.color="green";
+		mos_wtr1.color="green";
+		mos_drr2.color="blue";
+		mos_drr1.color="blue";
+		mos_wtwt.color="gray";
+		mos_wtdr.color="blue";
+		mos_drdr.color="blue";
+		if(num_adult_females>0){
+		mos_carrier1.color="yellow";
+		mos_carrier2.color="yellow";
+		mos_infectious.color="red";
+		}
+		healthy.color="gray";
+		patient.color="red";
+		carrier.color="yellow";
+		resistant.color="blue";
+	
+	}
+	nodes=p4.individuals;
+	
+	if (num_wt <  EQUILIBRIUM_WT_ALLELE_THRESHOLD*LATE_CAPACITY*2) {
+		catn("POTENTIAL_CHASE:: " + this_gen+" "+num_fertile_females+" "+LATE_CAPACITY);
+		CHASING = 1;
+		
+		if (TRACK_BY_CELL) {
+			if (!vector.getValue("start_gc_tracking"))
+				vector.setValue("start_gc_tracking", T); //now start tracking by cell
+		}
+	}
+	else{
+		catn("POTENTIAL_CHASE:: " + "-1"+" "+num_fertile_females+" "+LATE_CAPACITY);
+	}
+	if (TRACK_BY_CELL)  {
+		//only start recording once the number of WT alleles first falls below 80% of equilibrium
+		if (vector.getValue("start_gc_tracking")) {
+			nondrive = target_species[target_species.countOfMutationsOfType(m2) == 0]; //obtain non-drive individuals
+			nonx = nondrive.x;
+			nony = nondrive.y;
+			allx = target_species.x; //also track overall green's coefficient
+			ally = target_species.y;
+			pos_vec = 0:(sqrt(NUMBER_OF_CELLS) - 1);
+			dim = length(pos_vec);
+			cell_width = 1.0/dim;
+			positions = pos_vec * cell_width; //iterate through these x and y positions
+			nondrive_track = c(); //used for chasing detection
+			all_track = c();
+			
+			for (i in 0:(dim-1)) {
+				div_left = positions[i];
+				for (j in 0:(dim-1)) {
+					div_bot = positions[j];
+					
+					nondrive_in_division = (nonx >= div_left) & (nonx < (div_left + cell_width)) & (nony >= div_bot) & (nony < (div_bot + cell_width));
+					nondrive_in_cell = nondrive[nondrive_in_division];
+					nondrive_cell_count = size(nondrive_in_cell); //number in this cell
+					nondrive_track = c(nondrive_track, nondrive_cell_count); //add this onto this generation's count tracker
+					
+					all_in_division = (allx >= div_left) & (allx < (div_left + cell_width)) & (ally >= div_bot) & (ally < (div_bot + cell_width));
+					all_in_cell = target_species[all_in_division];
+					all_cell_count = size(all_in_cell);
+					all_track = c(all_track, all_cell_count);
+				}
+			} //done obtaining cell counts
+			
+			//Green's Coefficient is a measure of clustering for this generation
+			//when individuals are completely randomly distributed, GC = 0.
+			//when individuals are as clustered as possible, GC = 1.
+			
+			nondrive_pop_size = sum(nondrive_track);
+			
+			//prevent nan errors
+			if (nondrive_pop_size > 1) {
+				nondrive_greens_coeff = (var(nondrive_track)/mean(nondrive_track) - 1)/(sum(nondrive_track) - 1);
+				all_greens_coeff = (var(all_track)/mean(all_track) - 1)/(sum(all_track)-1);
+				//YHA edit (1) number wt alleles (2) gen (3) population size (4) gc for chase detection (5) overall gc
+				catn("WT_ALLELES:: " + num_wt+ " " + nondrive_greens_coeff + " " + all_greens_coeff);
+			}
+		}
+	}
+	if(num_is_carrier+num_is_patient+num_mos_carrier1+num_mos_carrier2+num_mos_infectious==0){
+		catn("MALARIA_ELIMINATED");
+		if (vector.tag==-1&(MALARIA_FOCUS))
+			vector.tag=50;
+	}
+	if (vector.cycle>=ENDTIME){
+		community.simulationFinished();
+		catn("TIME_LIMIT_EXCEEDED");
+	
+	}
+}
+
+
+
+
+////END CONDITION.
+ticks all 601 late() {
+}
+
+//// EVALUATE SPATIAL INTERACTIONS BETWEEN INDIVIDUALS FOR MATE SELECTION.
+ticks all late() {
+	i1.evaluate(p2);
+	i3.evaluate(p10);
+
+}
+
